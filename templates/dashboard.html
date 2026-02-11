@@ -1,0 +1,643 @@
+{% extends "layout.html" %}
+
+{% block content %}
+<!-- EXTERNAL LIBS -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+<!-- HEIC CONVERSION LIB -->
+<script src="https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js"></script>
+
+<style>
+    /* Sidebar */
+    .sidebar {
+        min-height: 85vh;
+        border-right: 1px solid #e9ecef;
+        background: #fff;
+        padding-top: 20px;
+    }
+    .sidebar .nav-link {
+        color: #555;
+        font-weight: 500;
+        padding: 12px 20px;
+        border-radius: 0 25px 25px 0;
+        margin-bottom: 5px;
+    }
+    .sidebar .nav-link:hover {
+        background-color: #f0f2f5;
+        color: #007bff;
+    }
+    .sidebar .nav-link.active {
+        background-color: #e7f1ff;
+        color: #007bff;
+        font-weight: bold;
+    }
+    
+    /* Transfer Dropdown */
+    .transfer-dropdown {
+        width: 300px;
+        padding: 0;
+        max-height: 400px;
+        overflow-y: auto;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        border: none;
+    }
+    @media (max-width: 768px) {
+        .transfer-dropdown { width: 250px; right: 0; left: auto; }
+    }
+    .transfer-header {
+        padding: 10px 15px;
+        border-bottom: 1px solid #eee;
+        font-weight: bold;
+    }
+    .transfer-item {
+        padding: 10px 15px;
+        border-bottom: 1px solid #f8f9fa;
+        font-size: 0.85rem;
+    }
+    
+    /* Mobile Nav */
+    .mobile-nav {
+        overflow-x: auto;
+        white-space: nowrap;
+        background: #fff;
+        padding: 10px;
+        border-bottom: 1px solid #eee;
+    }
+    .mobile-nav .nav-link { display: inline-block; padding: 5px 15px; color: #555; }
+    .mobile-nav .nav-link.active { color: #007bff; font-weight: bold; background: #e7f1ff; border-radius: 15px; }
+</style>
+
+<!-- NAVBAR INJECTION SCRIPT -->
+<script>
+    document.addEventListener("DOMContentLoaded", () => {
+        const navbarContainer = document.querySelector('nav.navbar .container-fluid') || document.querySelector('nav.navbar .container');
+        
+        if(navbarContainer) {
+            const allDivs = navbarContainer.querySelectorAll('div, span, a');
+            allDivs.forEach(el => {
+                if (el.innerText && (el.innerText.includes("Storage Used") || el.innerText.includes("Hello,") || el.innerText.includes("Logout"))) {
+                    if(el.parentElement === navbarContainer || el.parentElement.parentElement === navbarContainer) {
+                         el.remove();
+                    } else {
+                        el.style.display = 'none';
+                    }
+                }
+            });
+            
+            const collapse = navbarContainer.querySelector('.collapse.navbar-collapse');
+            if(collapse) collapse.remove();
+
+            const controls = document.createElement('div');
+            controls.className = "d-flex align-items-center gap-3 ms-auto";
+            
+            // Check if Admin
+            const isAdmin = "{{ is_admin }}" === "True";
+            const adminLink = isAdmin ? `<li><a class="dropdown-item text-primary fw-bold" href="/admin">Admin Panel 🛡️</a></li>` : '';
+
+            controls.innerHTML = `
+                <!-- Transfer Button -->
+                <div class="dropdown">
+                    <button class="btn btn-outline-light border-0 position-relative" type="button" data-bs-toggle="dropdown" aria-expanded="false" title="Transfer Center">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" fill="currentColor" class="bi bi-arrow-down-up" viewBox="0 0 16 16">
+                            <path fill-rule="evenodd" d="M11.5 15a.5.5 0 0 0 .5-.5V2.707l3.146 3.147a.5.5 0 0 0 .708-.708l-4-4a.5.5 0 0 0-.708 0l-4 4a.5.5 0 1 0 .708.708L11 2.707V14.5a.5.5 0 0 0 .5.5zm-7-14a.5.5 0 0 1 .5.5v11.793l3.146-3.147a.5.5 0 0 1 .708.708l-4 4a.5.5 0 0 1-.708 0l-4-4a.5.5 0 0 1 .708-.708L4 13.293V1.5a.5.5 0 0 1 .5-.5z"/>
+                        </svg>
+                    </button>
+                    <div class="dropdown-menu dropdown-menu-end transfer-dropdown" onclick="event.stopPropagation()">
+                        <div class="transfer-header d-flex justify-content-between">
+                            <span>Transfer List</span>
+                            <span class="badge bg-secondary" id="transferCount">0</span>
+                        </div>
+                        <div id="transferListBody">
+                            <div class="text-center p-4 text-muted small">No active transfers</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- User Profile Button -->
+                <div class="dropdown">
+                    <button class="btn btn-outline-light border-0 p-0" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" fill="currentColor" class="bi bi-person-circle" viewBox="0 0 16 16">
+                            <path d="M11 6a3 3 0 1 1-6 0 3 3 0 0 1 6 0z"/>
+                            <path fill-rule="evenodd" d="M0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8zm8-7a7 7 0 0 0-5.468 11.37C3.242 11.226 4.805 10 8 10s4.757 1.225 5.468 2.37A7 7 0 0 0 8 1z"/>
+                        </svg>
+                    </button>
+                    <ul class="dropdown-menu dropdown-menu-end shadow">
+                        <li class="dropdown-header text-truncate" style="max-width: 200px;">{{ user }}</li>
+                        <li><hr class="dropdown-divider"></li>
+                        ${adminLink}
+                        <li><a class="dropdown-item" href="mailto:shreehanumantransport01@gmail.com">Help</a></li>
+                        <li><button class="dropdown-item text-danger" data-bs-toggle="modal" data-bs-target="#deleteAccountModal">Delete Account</button></li>
+                        <li><hr class="dropdown-divider"></li>
+                        <li><a class="dropdown-item" href="/logout">Signout</a></li>
+                    </ul>
+                </div>
+            `;
+            
+            navbarContainer.appendChild(controls);
+        }
+    });
+</script>
+
+<div class="container-fluid px-0">
+    <div class="row g-0">
+        <!-- ADMIN BANNER -->
+        {% if is_admin and viewing_user != user %}
+        <div class="col-12 bg-warning text-dark p-2 text-center fw-bold">
+            ⚠️ You are viewing files of: {{ viewing_user }} <a href="/admin" class="btn btn-sm btn-dark ms-3">Exit to Admin Panel</a>
+        </div>
+        {% endif %}
+
+        <!-- 1. LEFT SIDEBAR -->
+        <div class="col-md-2 sidebar d-none d-md-block">
+            <nav class="nav flex-column">
+                {% set user_param = "&view_user=" + viewing_user if viewing_user and viewing_user != user else "" %}
+                <a class="nav-link {% if category == 'all' %}active{% endif %}" href="/dashboard?category=all{{ user_param }}">🗂️ All Files</a>
+                <a class="nav-link {% if category == 'pictures' %}active{% endif %}" href="/dashboard?category=pictures{{ user_param }}">🖼️ Pictures</a>
+                <a class="nav-link {% if category == 'documents' %}active{% endif %}" href="/dashboard?category=documents{{ user_param }}">📄 Documents</a>
+                <a class="nav-link {% if category == 'videos' %}active{% endif %}" href="/dashboard?category=videos{{ user_param }}">🎥 Videos</a>
+                <a class="nav-link {% if category == 'music' %}active{% endif %}" href="/dashboard?category=music{{ user_param }}">🎵 Music</a>
+                <a class="nav-link mt-4 text-danger {% if is_recycle_bin %}active{% endif %}" href="/dashboard?category=recycle_bin{{ user_param }}">🗑️ Recycle Bin</a>
+                
+                <div class="mt-auto p-3 text-center text-muted small">
+                    <hr>
+                    <small>Storage: {{ storage_usage }}</small>
+                    <div class="progress mt-1" style="height: 5px;">
+                        <div class="progress-bar bg-primary" style="width: 5%"></div>
+                    </div>
+                </div>
+            </nav>
+        </div>
+
+        <!-- MOBILE NAV -->
+        <div class="col-12 d-md-none mobile-nav">
+            {% set user_param = "&view_user=" + viewing_user if viewing_user and viewing_user != user else "" %}
+            <a class="nav-link {% if category == 'all' %}active{% endif %}" href="/dashboard?category=all{{ user_param }}">All</a>
+            <a class="nav-link {% if category == 'pictures' %}active{% endif %}" href="/dashboard?category=pictures{{ user_param }}">Images</a>
+            <a class="nav-link {% if category == 'videos' %}active{% endif %}" href="/dashboard?category=videos{{ user_param }}">Videos</a>
+            <a class="nav-link {% if category == 'documents' %}active{% endif %}" href="/dashboard?category=documents{{ user_param }}">Docs</a>
+            <a class="nav-link {% if is_recycle_bin %}active{% endif %}" href="/dashboard?category=recycle_bin{{ user_param }}">Bin</a>
+        </div>
+
+        <!-- 2. MAIN CONTENT -->
+        <div class="col-md-10 col-12 p-3 p-md-4">
+            
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h5 class="mb-0">{% if is_recycle_bin %}Recycle Bin{% else %}My Files{% endif %}</h5>
+            </div>
+
+            <!-- ACTION TOOLBAR -->
+            <div class="d-flex flex-wrap align-items-center gap-2 mb-3 bg-light p-2 rounded">
+                {% if not is_recycle_bin %}
+                    <button class="btn btn-outline-dark btn-sm" onclick="toggleSelectAllBtn(this)" id="masterSelectBtn">Select All</button>
+                    
+                    {% if category == 'all' %}
+                        <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#uploadModal"><i class="bi bi-upload"></i> Upload</button>
+                        <button class="btn btn-outline-secondary btn-sm" data-bs-toggle="modal" data-bs-target="#createFolderModal">New Folder</button>
+                    {% endif %}
+
+                    <div id="bulkActions" class="btn-group btn-group-sm border-start ps-2 ms-1" style="display: none;">
+                        <button class="btn btn-outline-danger" onclick="deleteItems(false)">Delete</button>
+                        <button class="btn btn-outline-primary" onclick="downloadBulk()">Download</button>
+                    </div>
+                {% elif is_recycle_bin %}
+                    <button class="btn btn-outline-dark btn-sm" onclick="toggleSelectAllBtn(this)">Select All</button>
+                    <div id="bulkActions" class="btn-group btn-group-sm" style="display: none;">
+                        <button class="btn btn-success" onclick="restoreItems()">Restore</button>
+                        <button class="btn btn-danger" onclick="deleteItems(true)">Delete Permanently</button>
+                    </div>
+                {% endif %}
+
+                <div class="ms-auto btn-group btn-group-sm">
+                    <button type="button" class="btn btn-outline-secondary active" id="listViewBtn" onclick="switchView('list')">List</button>
+                    <button type="button" class="btn btn-outline-secondary" id="gridViewBtn" onclick="switchView('grid')">Grid</button>
+                </div>
+            </div>
+
+            {% if not is_recycle_bin and category == 'all' %}
+            <nav aria-label="breadcrumb" class="mb-3">
+                <ol class="breadcrumb small mb-0">
+                    {% set user_param = "&view_user=" + viewing_user if viewing_user and viewing_user != user else "" %}
+                    <li class="breadcrumb-item"><a href="/dashboard?category=all{{ user_param }}" class="text-decoration-none">Home</a></li>
+                    {% for crumb in breadcrumbs %}
+                        <li class="breadcrumb-item"><a href="/dashboard?path={{ crumb.path }}{{ user_param }}" class="text-decoration-none">{{ crumb.name }}</a></li>
+                    {% endfor %}
+                </ol>
+            </nav>
+            {% endif %}
+
+            <!-- FILES CONTAINER -->
+            <div id="filesContainer">
+                {% if not folders and not files %}
+                    <div class="col-12 text-center py-5 text-muted">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" fill="#f0f0f0" class="bi bi-folder" viewBox="0 0 16 16">
+                            <path d="M.54 3.87.5 3a2 2 0 0 1 2-2h3.672a2 2 0 0 1 1.414.586l.828.828A2 2 0 0 0 9.828 3h3.982a2 2 0 0 1 1.992 2.181l-.637 7A2 2 0 0 1 13.174 14H2.826a2 2 0 0 1-1.991-1.819l-.637-7a1.99 1.99 0 0 1 .342-1.31ZM2.19 3c-.24 0-.47.042-.683.12L1.5 2.98a1 1 0 0 1 1-1h4.672a1 1 0 0 1 .707.293L7.586 3H2.19Z"/>
+                        </svg>
+                        <p class="mt-2 small">No files here</p>
+                    </div>
+                {% endif %}
+
+                <!-- GRID VIEW -->
+                <div class="row g-2" id="gridContainer" style="display: none;">
+                    {% set user_param = "&view_user=" + viewing_user if viewing_user and viewing_user != user else "" %}
+                    <!-- Folders -->
+                    {% for folder in folders %}
+                    <div class="col-6 col-sm-4 col-md-3 col-lg-2">
+                        <div class="card h-100 shadow-sm border-0 bg-light position-relative file-card">
+                            <input class="form-check-input position-absolute top-0 start-0 m-2 file-checkbox" type="checkbox" value="{{ folder.name }}/" onclick="updateBulkState()">
+                            <div class="card-body text-center p-3 d-flex flex-column align-items-center" ondblclick="window.location.href='/dashboard?path={{ folder.full_path }}{{ user_param }}'" style="cursor: pointer;">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="50" height="50" fill="#ffc107" class="bi bi-folder-fill" viewBox="0 0 16 16"><path d="M9.828 3h3.982a2 2 0 0 1 1.992 2.181l-.637 7A2 2 0 0 1 13.174 14H2.826a2 2 0 0 1-1.991-1.819l-.637-7a1.99 1.99 0 0 1 .342-1.31L.5 3a2 2 0 0 1 2-2h3.672a2 2 0 0 1 1.414.586l.828.828A2 2 0 0 0 9.828 3zm-8.322.12C1.72 3.042 1.95 3 2.19 3h5.396l-.707-.707A1 1 0 0 0 6.172 1H2.5a1 1 0 0 0-1 .981l.006.139z"/></svg>
+                                <div class="text-truncate small fw-bold w-100 mt-2">{{ folder.name }}</div>
+                            </div>
+                            <div class="card-footer p-1 bg-transparent border-0 d-flex justify-content-center gap-2">
+                                <button class="btn btn-sm btn-light text-primary" onclick="downloadItem('{{ folder.name }}/')" title="Download Zip"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" class="bi bi-download" viewBox="0 0 16 16"><path d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5z"/><path d="M7.646 11.854a.5.5 0 0 0 .708 0l3-3a.5.5 0 0 0-.708-.708L8.5 10.293V1.5a.5.5 0 0 0-1 0v8.793L5.354 8.146a.5.5 0 1 0-.708.708l3 3z"/></svg></button>
+                                <button class="btn btn-sm btn-light text-danger" onclick="deleteItem('{{ folder.name }}/')" title="Delete"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" class="bi bi-trash" viewBox="0 0 16 16"><path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5Zm2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5Zm3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0V6Z"/><path d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1h3.5a1 1 0 0 1 1 1v1ZM4.118 4 4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4H4.118ZM2.5 3h11V2h-11v1Z"/></svg></button>
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+
+                    <!-- Files -->
+                    {% for file in files %}
+                    <div class="col-6 col-sm-4 col-md-3 col-lg-2">
+                        <div class="card h-100 shadow-sm border-0 bg-white position-relative file-card">
+                            <input class="form-check-input position-absolute top-0 start-0 m-2 file-checkbox" type="checkbox" value="{{ file.name }}" onclick="updateBulkState()">
+                            <div class="card-img-top d-flex align-items-center justify-content-center bg-light" style="height: 100px; overflow: hidden; cursor: pointer;" onclick="fetchAndPreview('{{ file.name }}', '{{ file.type }}')">
+                                {% if file.type == 'image' %}
+                                    <!-- Use preview_url which routes to backend thumbnail generator -->
+                                    <img src="{{ file.preview_url }}" class="w-100 h-100 object-fit-cover">
+                                {% else %}
+                                    <span style="font-size: 2rem;">📄</span>
+                                {% endif %}
+                            </div>
+                            <div class="card-body p-2 text-center">
+                                <div class="text-truncate small fw-bold" title="{{ file.name }}">{{ file.name }}</div>
+                                <div class="text-muted" style="font-size: 0.7rem;">{{ file.size }}</div>
+                            </div>
+                            <div class="card-footer p-1 bg-transparent border-0 d-flex justify-content-center gap-2">
+                                <button class="btn btn-sm btn-light text-primary" onclick="downloadItem('{{ file.name }}')">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" class="bi bi-download" viewBox="0 0 16 16"><path d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5z"/><path d="M7.646 11.854a.5.5 0 0 0 .708 0l3-3a.5.5 0 0 0-.708-.708L8.5 10.293V1.5a.5.5 0 0 0-1 0v8.793L5.354 8.146a.5.5 0 1 0-.708.708l3 3z"/></svg>
+                                </button>
+                                <button class="btn btn-sm btn-light text-danger" onclick="deleteItem('{{ file.name }}')">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" class="bi bi-trash" viewBox="0 0 16 16"><path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5Zm2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5Zm3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0V6Z"/><path d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1h3.5a1 1 0 0 1 1 1v1ZM4.118 4 4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4H4.118ZM2.5 3h11V2h-11v1Z"/></svg>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+
+                <!-- LIST VIEW (Updated Buttons - FIXED) -->
+                <div class="list-group" id="listContainer">
+                    {% set user_param = "&view_user=" + viewing_user if viewing_user and viewing_user != user else "" %}
+                    {% for folder in folders %}
+                    <div class="list-group-item d-flex justify-content-between align-items-center p-2">
+                        <div class="d-flex align-items-center gap-3 flex-grow-1 overflow-hidden">
+                            <input class="form-check-input file-checkbox" type="checkbox" value="{{ folder.name }}/" onclick="updateBulkState()">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="#ffc107" class="bi bi-folder-fill flex-shrink-0" viewBox="0 0 16 16"><path d="M9.828 3h3.982a2 2 0 0 1 1.992 2.181l-.637 7A2 2 0 0 1 13.174 14H2.826a2 2 0 0 1-1.991-1.819l-.637-7a1.99 1.99 0 0 1 .342-1.31L.5 3a2 2 0 0 1 2-2h3.672a2 2 0 0 1 1.414.586l.828.828A2 2 0 0 0 9.828 3zm-8.322.12C1.72 3.042 1.95 3 2.19 3h5.396l-.707-.707A1 1 0 0 0 6.172 1H2.5a1 1 0 0 0-1 .981l.006.139z"/></svg>
+                            <a href="/dashboard?path={{ folder.full_path }}{{ user_param }}" class="text-decoration-none text-dark fw-bold text-truncate">{{ folder.name }}</a>
+                        </div>
+                        <div class="d-flex align-items-center gap-2">
+                            <button class="btn btn-outline-primary btn-sm" onclick="downloadItem('{{ folder.name }}/')">Download</button>
+                            <button class="btn btn-outline-danger btn-sm" onclick="deleteItem('{{ folder.name }}/')">Delete</button>
+                        </div>
+                    </div>
+                    {% endfor %}
+
+                    {% for file in files %}
+                    <div class="list-group-item d-flex justify-content-between align-items-center p-2">
+                        <div class="d-flex align-items-center gap-3 flex-grow-1 overflow-hidden">
+                            <input class="form-check-input file-checkbox" type="checkbox" value="{{ file.name }}" onclick="updateBulkState()">
+                            <div style="width: 24px;" class="text-center flex-shrink-0">
+                                {% if file.type == 'image' %}
+                                    <img src="{{ file.preview_url }}" style="width: 24px; height: 24px; object-fit: cover; border-radius: 4px;">
+                                {% else %}
+                                     <span>📄</span>
+                                {% endif %}
+                            </div>
+                            <a href="#" onclick="fetchAndPreview('{{ file.name }}', '{{ file.type }}')" class="text-decoration-none text-dark text-truncate">{{ file.name }}</a>
+                        </div>
+                        <div class="d-flex align-items-center gap-2">
+                            <button class="btn btn-outline-primary btn-sm" onclick="downloadItem('{{ file.name }}')">Download</button>
+                            <button class="btn btn-outline-danger btn-sm" onclick="deleteItem('{{ file.name }}')">Delete</button>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Upload, Create Folder, Delete Account Modals (Same as before) -->
+<div class="modal fade" id="uploadModal" tabindex="-1"><div class="modal-dialog"><div class="modal-content"><div class="modal-header"><h5 class="modal-title">Upload</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body text-center"><button class="btn btn-primary w-100 mb-3" onclick="document.getElementById('fileInput').click()">Upload Files</button><button class="btn btn-outline-primary w-100" onclick="document.getElementById('folderInput').click()">Upload Folder</button><form id="uploadForm"><input type="hidden" name="current_path" value="{{ current_path }}"><input type="file" name="files" id="fileInput" class="d-none" multiple><input type="file" id="folderInput" webkitdirectory directory multiple class="d-none" onchange="handleFolderUpload(this)"></form></div></div></div></div>
+<div class="modal fade" id="createFolderModal" tabindex="-1"><div class="modal-dialog"><form action="/create_folder" method="POST" class="modal-content"><div class="modal-header"><h5 class="modal-title">New Folder</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><input type="hidden" name="current_path" value="{{ current_path }}"><input type="hidden" name="category" value="{{ category }}"><input type="text" name="folder_name" class="form-control" placeholder="Folder Name" required></div><div class="modal-footer"><button type="submit" class="btn btn-primary">Create</button></div></form></div></div>
+<div class="modal fade" id="deleteAccountModal" tabindex="-1"><div class="modal-dialog"><div class="modal-content"><div class="modal-header bg-danger text-white"><h5 class="modal-title">Delete Account</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><div id="delStep1"><p>Enter your email to verify identity.</p><input type="email" id="delEmail" class="form-control mb-3" placeholder="Enter Email"><button class="btn btn-danger w-100" onclick="sendDeleteOtp()">Send OTP</button></div><div id="delStep2" style="display:none;"><p class="text-success">OTP sent! Check your Mail.</p><input type="text" id="delOtp" class="form-control mb-2" placeholder="Enter 6-digit OTP"><textarea id="delReason" class="form-control mb-3" placeholder="Reason..."></textarea><button class="btn btn-danger w-100" onclick="confirmDeleteAccount()">Permanently Delete</button></div></div></div></div></div>
+<div class="modal fade" id="previewModal" tabindex="-1" aria-hidden="true"><div class="modal-dialog modal-lg modal-dialog-centered"><div class="modal-content bg-dark"><div class="modal-body text-center p-0"><img id="imagePreview" src="" class="img-fluid" style="max-height: 80vh; display: none;"><video id="videoPreview" controls class="w-100" style="max-height: 80vh; display: none;"></video></div></div></div></div>
+
+<script>
+    const currentPath = "{{ current_path }}";
+    const activeTransfers = {};
+
+    async function fetchAndPreview(filename, fileType) {
+        try {
+            const response = await fetch('/get_file_url', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ 
+                    filename: filename, 
+                    current_path: currentPath // Using const defined above
+                })
+            });
+            
+            const data = await response.json();
+            
+            if (data.url) {
+                openPreview(data.url, fileType, filename);
+            } else {
+                alert("Error: " + (data.error || "Could not get file URL"));
+            }
+        } catch (err) {
+            console.error(err);
+            alert("Network error while fetching preview.");
+        }
+    }
+
+    function updateBulkState() {
+        const checked = document.querySelectorAll('.file-checkbox:checked').length > 0;
+        document.getElementById('bulkActions').style.display = checked ? 'inline-flex' : 'none';
+        
+        const allCheckboxes = document.querySelectorAll('.file-checkbox');
+        const selectAllBtn = document.getElementById('masterSelectBtn');
+        if(selectAllBtn) {
+            const allChecked = allCheckboxes.length > 0 && Array.from(allCheckboxes).every(cb => cb.checked);
+            selectAllBtn.textContent = allChecked ? "Deselect All" : "Select All";
+            if(allChecked) selectAllBtn.classList.add('active'); else selectAllBtn.classList.remove('active');
+        }
+    }
+
+    function toggleSelectAllBtn(btn) {
+        const checkboxes = document.querySelectorAll('.file-checkbox');
+        const isAllSelected = Array.from(checkboxes).every(cb => cb.checked);
+        checkboxes.forEach(cb => cb.checked = !isAllSelected);
+        updateBulkState();
+    }
+
+    function addToTransferList(id, name, type, percent) {
+        const body = document.getElementById('transferListBody');
+        const badge = document.getElementById('transferCount');
+        
+        if(body.innerText.includes("No active")) body.innerHTML = "";
+        
+        let existingItem = document.getElementById(`transfer-${id}`);
+        if(!existingItem) {
+            existingItem = document.createElement('div');
+            existingItem.id = `transfer-${id}`;
+            existingItem.className = 'transfer-item';
+            body.appendChild(existingItem);
+            
+            const count = body.querySelectorAll('.transfer-item').length;
+            if(badge) badge.innerText = count;
+        }
+        
+        const color = type === 'Upload' ? 'text-success' : 'text-primary';
+        
+        let actionHtml = '';
+        if (percent < 100) {
+            // FIX: Ensure Cancel Button is Clickable
+            actionHtml = `
+                <button type="button" class="btn btn-sm btn-light border-0 p-0 text-danger" onclick="cancelTransfer('${id}', '${type}')" title="Cancel" style="z-index:1000; position:relative;">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-x-circle-fill" viewBox="0 0 16 16">
+                        <path d="M16 8A8 8 0 1 1 0 8a8 8 0 0 1 16 0zM5.354 4.646a.5.5 0 1 0-.708.708L7.293 8l-2.647 2.646a.5.5 0 0 0 .708.708L8 8.707l2.646 2.647a.5.5 0 0 0 .708-.708L8.707 8l2.647-2.646a.5.5 0 0 0-.708-.708L8 7.293 5.354 4.646z"/>
+                    </svg>
+                </button>`;
+        } else {
+            actionHtml = `<span class="text-success small fw-bold">✓</span>`;
+        }
+
+        existingItem.innerHTML = `
+            <div class="d-flex justify-content-between align-items-center mb-1">
+                <div class="text-truncate" style="max-width: 150px;" title="${name}">${name}</div>
+                <div class="d-flex align-items-center gap-2">
+                    <span class="${color} small fw-bold">${type}</span>
+                    ${actionHtml}
+                </div>
+            </div>
+            <div class="progress" style="height: 4px;">
+                <div class="progress-bar ${type === 'Upload' ? 'bg-success' : 'bg-primary'}" style="width: ${percent}%"></div>
+            </div>
+            <div class="text-end mt-1" style="font-size: 0.7rem;">${percent.toFixed(1)}%</div>
+        `;
+    }
+
+    function cancelTransfer(id, type) {
+        console.log(`Cancelling: ${id} (${type})`);
+        if (activeTransfers[id]) {
+            try {
+                if(type === 'Upload') activeTransfers[id].abort(); 
+                else activeTransfers[id].abort();
+            } catch(e) { console.error(e); }
+            delete activeTransfers[id];
+            const item = document.getElementById(`transfer-${id}`);
+            if (item) {
+                item.innerHTML = `<div class="text-muted small">Cancelled: ${id}</div>`;
+                setTimeout(() => {
+                    item.remove();
+                    const body = document.getElementById('transferListBody');
+                    if(body && body.children.length === 0) body.innerHTML = '<div class="text-center p-4 text-muted small">No active transfers</div>';
+                }, 2000);
+            }
+        }
+    }
+
+    document.getElementById('fileInput').addEventListener('change', function() { if(this.files.length > 0) performUpload(this.files); });
+    function handleFolderUpload(input) { if(input.files.length > 0) performUpload(input.files); }
+    
+    async function performUpload(fileList) {
+        bootstrap.Modal.getInstance(document.getElementById('uploadModal')).hide();
+        for (let i = 0; i < fileList.length; i++) {
+            const file = fileList[i];
+            const fName = file.webkitRelativePath || file.name;
+            const transferId = `up-${fName.replace(/[^a-zA-Z0-9]/g, '')}`;
+            addToTransferList(transferId, fName, 'Upload', 0);
+            try {
+                const presignRes = await fetch('/get_presigned_upload', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ filename: fName, file_type: file.type || 'application/octet-stream', current_path: currentPath }) });
+                const presignData = await presignRes.json();
+                await new Promise((resolve, reject) => {
+                    const xhr = new XMLHttpRequest();
+                    activeTransfers[transferId] = xhr;
+                    xhr.open('POST', presignData.url);
+                    xhr.upload.onprogress = (e) => { if (e.lengthComputable) addToTransferList(transferId, fName, 'Upload', (e.loaded/e.total)*100); };
+                    xhr.onload = () => { delete activeTransfers[transferId]; if(xhr.status >= 200 && xhr.status < 300) resolve(); else reject(xhr.statusText); };
+                    xhr.onerror = () => { delete activeTransfers[transferId]; reject("Network Error"); }
+                    xhr.onabort = () => reject("Cancelled");
+                    const formData = new FormData();
+                    Object.keys(presignData.fields).forEach(key => formData.append(key, presignData.fields[key]));
+                    formData.append('file', file);
+                    xhr.send(formData);
+                });
+                addToTransferList(transferId, fName, 'Upload', 100);
+            } catch (err) { if(err !== "Cancelled") document.getElementById(`transfer-${transferId}`).innerHTML += `<span class="text-danger small"> Failed</span>`; }
+        }
+        await fetch('/upload_success', {method: 'POST'});
+        setTimeout(() => window.location.reload(), 1000);
+    }
+
+    function downloadItem(name) { downloadBulkItems([name], name); }
+    function downloadBulk() {
+        const checkboxes = document.querySelectorAll('.file-checkbox:checked');
+        const files = Array.from(checkboxes).map(cb => cb.value);
+        if (files.length === 0) return;
+        const displayName = files.length === 1 ? files[0] : `Batch (${files.length} items)`;
+        checkboxes.forEach(cb => cb.checked = false); // Auto deselect
+        updateBulkState();
+        downloadBulkItems(files, displayName);
+    }
+
+    function downloadBulkItems(files, transferName) {
+        const transferId = `down-${Date.now()}`;
+        addToTransferList(transferId, transferName, 'Download', 0);
+        const controller = new AbortController();
+        activeTransfers[transferId] = controller;
+
+        fetch('/get_zip_urls', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({filenames: files, current_path: currentPath}), signal: controller.signal })
+        .then(res => res.json())
+        .then(async (data) => {
+            if(data.error) throw new Error(data.error);
+            const zip = new JSZip();
+            for (let i = 0; i < data.files.length; i++) {
+                const f = data.files[i];
+                const response = await fetch(f.url, { signal: controller.signal });
+                const contentLength = +response.headers.get('Content-Length');
+                const reader = response.body.getReader();
+                const chunks = [];
+                let received = 0;
+                while(true) {
+                    const {done, value} = await reader.read();
+                    if (done) break;
+                    chunks.push(value);
+                    received += value.length;
+                    if (contentLength) {
+                        const filePercent = (received / contentLength);
+                        const totalPercent = ((i + filePercent) / data.files.length) * 100;
+                        addToTransferList(transferId, transferName, 'Download', totalPercent);
+                    }
+                }
+                zip.file(f.filename, new Blob(chunks));
+            }
+            const content = await zip.generateAsync({type:"blob"});
+            saveAs(content, "download.zip");
+            delete activeTransfers[transferId];
+            addToTransferList(transferId, transferName, 'Download', 100);
+        })
+        .catch(err => { if (err.name !== 'AbortError') alert("Download error: " + err); });
+    }
+
+    function deleteItems(p) { 
+        const checkboxes = document.querySelectorAll('.file-checkbox:checked');
+        const files = Array.from(checkboxes).map(cb => cb.value);
+        if(!confirm(`Delete ${files.length} items?`)) return;
+        fetch('/delete_files', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({filenames: [...new Set(files)], current_path: currentPath, permanent: p}) })
+        .then(() => window.location.reload());
+    }
+    function restoreItems() { 
+        const checkboxes = document.querySelectorAll('.file-checkbox:checked');
+        const files = Array.from(checkboxes).map(cb => cb.value);
+        fetch('/restore_files', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify([...new Set(files)]) })
+        .then(() => window.location.reload());
+    }
+    function deleteItem(n) { 
+        const type = n.endsWith('/') ? 'folder and its contents' : 'file';
+        if(confirm(`Delete ${type} "${n}"?`)) { 
+            fetch('/delete_files', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({filenames:[n], current_path:currentPath, permanent:false})}).then(()=>window.location.reload()); 
+        } 
+    }
+    function sendDeleteOtp() { 
+        const emailInput = document.getElementById('delEmail');
+        const btn = document.querySelector('#delStep1 button');
+        const email = emailInput.value;
+        if(!email) { alert("Enter email"); return; }
+        
+        btn.innerText = "Sending...";
+        btn.disabled = true;
+        
+        const formData = new FormData();
+        formData.append('email', email);
+        
+        fetch('/send_delete_otp', { method: 'POST', body: formData })
+        .then(res => res.json())
+        .then(data => {
+            if(data.error) alert(data.error);
+            else {
+                document.getElementById('delStep1').style.display = 'none';
+                document.getElementById('delStep2').style.display = 'block';
+            }
+        })
+        .catch(err => alert("Connection error"))
+        .finally(() => { btn.innerText = "Send OTP"; btn.disabled = false; });
+    }
+    function confirmDeleteAccount() { 
+        const email = document.getElementById('delEmail').value;
+        const otp = document.getElementById('delOtp').value;
+        const reason = document.getElementById('delReason').value;
+
+        // NEW VALIDATION
+        if (!reason.trim()) {
+            alert("Please provide a reason for deleting your account.");
+            return;
+        }
+
+        const formData = new FormData();
+        formData.append('email', email);
+        formData.append('otp', otp);
+        formData.append('reason', reason);
+        fetch('/confirm_delete_account', { method: 'POST', body: formData })
+        .then(res => res.json())
+        .then(data => {
+            if(data.error) alert(data.error);
+            else {
+                alert(data.message);
+                window.location.href = data.redirect;
+            }
+        });
+    }
+    function openPreview(u, t, n) { 
+        if(n.toLowerCase().endsWith('.heic')) {
+            const m=new bootstrap.Modal(document.getElementById('previewModal'));
+            const i=document.getElementById('imagePreview');
+            i.style.display='block'; i.src = "https://cdnjs.cloudflare.com/ajax/libs/galleriffic/2.0.1/css/loader.gif";
+            m.show();
+            
+            fetch(u)
+                .then(res => res.blob())
+                .then(blob => heic2any({ blob: blob, toType: "image/jpeg" }))
+                .then(conversionResult => {
+                    i.src = URL.createObjectURL(conversionResult);
+                })
+                .catch(e => {
+                    console.error(e);
+                    alert("Could not preview HEIC image.");
+                    m.hide();
+                });
+        } else {
+            const m=new bootstrap.Modal(document.getElementById('previewModal'));
+            const i=document.getElementById('imagePreview'), v=document.getElementById('videoPreview');
+            i.style.display='none'; v.style.display='none'; v.src="";
+            if(t==='image'){
+                i.src=u; 
+                i.style.display='block';
+            } else if(t==='video'){
+                v.src=u; 
+                v.style.display='block';
+            }
+            m.show();
+        }
+    }
+    function switchView(v) { 
+        document.getElementById('gridContainer').style.display = v==='grid'?'flex':'none';
+        document.getElementById('listContainer').style.display = v==='list'?'block':'none';
+        localStorage.setItem('viewPreference', v);
+        updateBulkState(); // Refresh state on switch
+    }
+    document.addEventListener("DOMContentLoaded", () => { switchView(localStorage.getItem('viewPreference')||'list'); });
+</script>
+{% endblock %}

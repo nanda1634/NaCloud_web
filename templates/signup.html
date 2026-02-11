@@ -1,0 +1,32 @@
+{% extends "layout.html" %}
+
+{% block content %}
+<div class="auth-container">
+    <h3 class="text-center mb-4">Create Account</h3>
+    <form method="POST" action="/signup">
+        <div class="mb-3">
+            <label class="form-label">Email Address</label>
+            <!-- Pattern forces email to end in @gmail.com -->
+            <input type="email" name="email" class="form-control" placeholder="user@gmail.com" 
+                   required pattern=".+@gmail\.com" title="Please enter a valid @gmail.com address">
+            <div class="form-text text-danger">Only @gmail.com addresses are accepted.</div>
+        </div>
+        <div class="mb-3">
+            <label class="form-label">Mobile Number</label>
+            <input type="tel" name="phone" class="form-control" placeholder="+1234567890" required>
+            <div class="form-text">Must include country code (e.g. +1, +91).</div>
+        </div>
+        <div class="mb-3">
+            <label class="form-label">Password</label>
+            <input type="password" name="password" class="form-control" required>
+            <div class="form-text">Use uppercase, number, and special char.</div>
+        </div>
+        <div class="d-grid">
+            <button type="submit" class="btn btn-primary">Sign Up</button>
+        </div>
+    </form>
+    <div class="text-center mt-3">
+        <a href="/login">Already registered? Login</a>
+    </div>
+</div>
+{% endblock %}
